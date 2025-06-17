@@ -1,6 +1,5 @@
 import numpy as np
 from ultralytics import YOLO
-import torch
 import cv2
 
 
@@ -9,7 +8,7 @@ def keypoint_initialize():
     return model
 
 
-def yolo_keypoint(frame, model, is_first_frame=False, first_frame_bbox=None, alpha=0.0):
+def keypoint(frame, model, is_first_frame=False, first_frame_bbox=None, alpha=0.0):
     height, width = frame.shape[:2]
     frame_center = np.array([(width / 2) - alpha * width, height / 2])
 
