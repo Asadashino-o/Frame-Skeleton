@@ -10,8 +10,8 @@ PyCharm is recommended.
 You can open the Folder as pyCharm project.
 
 ## Getting Started
-*Please firstly download the video dataset from website(the address is given in the ./data/videos_160/readme)
-Place 'all_mp4_file' in the (./data/) directory. 
+*Please firstly download the video dataset from website,
+You can get the npy files through ./Preprocess/generate_npy.py. 
 
 ### Train
 * Download the MobileNetV2 pretrained weights from this [repository](https://github.com/tonylins/pytorch-mobilenet-v2) 
