@@ -9,9 +9,12 @@ The network architecture of Frame-Skeleton, a two-stream network for action even
 The parameter count of the entire model is less than 8 million. While ensuring lightweight, it solves the overfitting problem of small datasets and has a good effect on the key frame detection of single-person movement
 
 ## Dependencies
-* [PyTorch](https://pytorch.org/)
-PyCharm is recommended.
-You can open the Folder as pyCharm project.
+
+To utilize this tool, ensure the installation of:
+- Python 3.8 or later
+- [PyTorch](https://pytorch.org/)(preferably with CUDA for GPU support)
+PyCharm is recommended.You can open the Folder as pyCharm project.
+
 
 ## Getting Started
 * Please firstly download the video dataset from website.
