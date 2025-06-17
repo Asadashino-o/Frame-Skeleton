@@ -28,7 +28,7 @@ To utilize this tool, ensure the installation of:
 
 2. Clone the repository:
     ```bash
-    git clone https://github.com/Asadashino-o/Frame-Skeleton.gi
+    git clone https://github.com/Asadashino-o/Frame-Skeleton.git
     cd Frame-Skeleton
     ```
    
