@@ -10,7 +10,7 @@ PyCharm is recommended.
 You can open the Folder as pyCharm project.
 
 ## Getting Started
-*Please firstly download the video dataset from website,
+*Please firstly download the video dataset from website.
 You can get the npy files through ./Preprocess/generate_npy.py. 
 
 ### Train
