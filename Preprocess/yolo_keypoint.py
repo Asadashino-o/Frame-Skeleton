@@ -4,7 +4,7 @@ import cv2
 
 
 def keypoint_initialize():
-    model = YOLO("../weights/yolov11l-pose.pt")
+    model = YOLO("./weights/yolov11l-pose.pt")
     return model
 
 
