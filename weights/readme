@@ -1,3 +1,3 @@
-1.put imagenet pretrain mobilenetv2 model mobilenet_v2.pth.tar in ./weights/mobilenet_v2.pth.tar;
-2.put trained detectron2-pose model or yolovn-pose model in ./weights/xx.pt or ./weights/xx.pkl;
-3.put trained model frame_skeleton.pth.tar in ./weights/frame_skeleton.pth.tar;
+1.put imagenet pretrain mobilenetv2 model mobilenet_v2.pth.tar in ./weights/mobilenet_v2.pth.tar; (download link:https://github.com/tonylins/pytorch-mobilenet-v2)
+2.put trained detectron2-pose model or yolovn-pose model in ./weights/xx.pt or ./weights/xx.pkl;(download link:https://github.com/facebookresearch/detectron2/blob/main/MODEL_ZOO.md)
+3.put trained model frame_skeleton.pth.tar in ./weights/frame_skeleton.pth.tar;(download:please leave message to contact author.)
