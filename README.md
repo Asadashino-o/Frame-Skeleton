@@ -13,7 +13,8 @@ The parameter count of the entire model is less than 8 million. While ensuring l
 To utilize this tool, ensure the installation of:
 - Python 3.8 or later
 - [PyTorch](https://pytorch.org/) (prefer with CUDA for GPU support)
-- PyCharm is recommended. You can open the Folder as pyCharm project.
+- PyCharm or VScode is recommended. You can open the Folder as PyCharm or VScode project.
+- Better for linux system and gpu.
 
 ## Installation Steps
 
