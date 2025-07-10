@@ -22,7 +22,6 @@ To utilize this tool, ensure the installation of:
    ```
    conda create -n your_env_name python=3.9
    conda activate your_env_name
-   
    ```
    Install the right pytorch version and able to use cuda.
    You can use "nvcc -V" to see your cuda version
