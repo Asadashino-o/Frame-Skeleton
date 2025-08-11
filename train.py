@@ -128,6 +128,6 @@ def train_model(mode,fusion_type):
 
 if __name__ == '__main__':
     mode = 'golfdb' # mode=golfdb/dtl/fo
-    fusion_type = 'mlp' # fusion_type=add/concat/gate/mul/mlp
+    fusion_type = 'gate' # fusion_type=add/concat/gate/mul/mlp
     train_model(mode=mode,fusion_type=fusion_type) 
     print("finish")
