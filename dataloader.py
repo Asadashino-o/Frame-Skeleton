@@ -10,8 +10,9 @@ class GolfDB(Dataset):
     def __init__(self, data_file, vid_dir, npy_dir, seq_length, input_size=160,
                  transform=None, train=True, multi_format=False, mode='dtl'):
         """
-        mode: 'dtl'（默认）→ 8类（含1个背景类）,关键10帧,第1和最后一个动作默认不检测
-              'fo' → 12类（含1个背景类）,关键13帧,第1和最后一个动作默认不检测
+        mode: 'dtl'（默认）→ 9类（含1个背景类）,关键10帧,第1和最后一个动作默认不检测;
+              'fo' → 12类（含1个背景类）,关键13帧,第1和最后一个动作默认不检测;
+              'golfdb'→ 9类（含1个背景类）,关键8帧;
         """
         self.df = read_txt(data_file)
         self.vid_dir = vid_dir
@@ -24,10 +25,10 @@ class GolfDB(Dataset):
 
         if mode == 'fo':
             self.default_label = 11  # FO共0~11：11类 + 背景
-        elif mode == 'dtl':
+        elif mode == 'dtl' or mode == 'golfdb':
             self.default_label = 8   # DTL共0~8：8类 + 背景
         else:
-            raise ValueError(f"Unsupported mode: {mode}. Use 'dtl' or 'fo'.")
+            raise ValueError(f"Unsupported mode: {mode}. Use 'dtl' or 'fo' or 'golfdb.")
 
     def __len__(self):
         return len(self.df)
@@ -165,4 +166,14 @@ if __name__ == '__main__':
         train=False,
         multi_format=True,
         mode='fo'
+    )
+    dataset_dtl = GolfDB(
+        data_file='/data/ssd1/xietingyu/golfdb/data/golfdb/label.txt',
+        vid_dir='/data/ssd1/xietingyu/golfdb/data/golfdb/all_mp4_file',
+        npy_dir='/data/ssd1/xietingyu/golfdb/data/golfdb/key_point',
+        seq_length=64,
+        transform=transforms.Compose([ToTensor(), norm]),
+        train=False,
+        multi_format=True,
+        mode='golfdb'
     )

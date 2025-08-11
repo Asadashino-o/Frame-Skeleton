@@ -1,15 +1,36 @@
 import torch
 import torch.nn as nn
 from torch.autograd import Variable
-from Model.image_encode import MobileNetV2
-from Model.semantic_encoder import STGCN
+from thop import profile
+from module.image_encode import MobileNetV2
+from module.semantic_encoder import STGCN
 
 
 class FeatureFusionModule(nn.Module):
-    def __init__(self, cnn_dim=1280, stgcn_dim=256, fused_dim=256):
+    def __init__(self, cnn_dim, stgcn_dim, fused_dim, fusion_type='add'):
         super(FeatureFusionModule, self).__init__()
+        assert fusion_type in ['add', 'concat', 'gate', 'mul', 'mlp'], \
+            "fusion_type must be one of ['add', 'concat', 'gate', 'mul', 'mlp']"
+        self.fusion_type = fusion_type
+
         self.cnn_proj = nn.Linear(cnn_dim, fused_dim)
         self.stgcn_proj = nn.Linear(stgcn_dim, fused_dim)
+
+        if fusion_type == 'concat' or fusion_type == 'mlp':
+            self.concat_proj = nn.Linear(fused_dim * 2, fused_dim)
+
+        if fusion_type == 'mlp':
+            self.mlp = nn.Sequential(
+                nn.Linear(fused_dim * 2, fused_dim * 2),
+                nn.ReLU(),
+                nn.Linear(fused_dim * 2, fused_dim)
+            )
+
+        if fusion_type == 'gate':
+            self.gate_fc = nn.Sequential(
+                nn.Linear(fused_dim * 2, fused_dim),
+                nn.Sigmoid()
+            )
 
         self.attention = nn.Sequential(
             nn.Linear(fused_dim, fused_dim // 4),
@@ -19,19 +40,38 @@ class FeatureFusionModule(nn.Module):
         )
 
     def forward(self, cnn_feat, stgcn_feat):
-        cnn_feat = self.cnn_proj(cnn_feat)  # (batch_size, timesteps, fused_dim)
-        stgcn_feat = self.stgcn_proj(stgcn_feat)
+        cnn_feat = self.cnn_proj(cnn_feat)        # (B, T, D)
+        stgcn_feat = self.stgcn_proj(stgcn_feat)  # (B, T, D)
 
-        fused_feat = cnn_feat + stgcn_feat
+        if self.fusion_type == 'add':
+            fused_feat = cnn_feat + stgcn_feat
 
-        attention_weights = self.attention(fused_feat)
+        elif self.fusion_type == 'concat':
+            fused_feat = torch.cat([cnn_feat, stgcn_feat], dim=-1)
+            fused_feat = self.concat_proj(fused_feat)
+
+        elif self.fusion_type == 'gate':
+            gate_input = torch.cat([cnn_feat, stgcn_feat], dim=-1)
+            gate = self.gate_fc(gate_input)
+            fused_feat = gate * cnn_feat + (1 - gate) * stgcn_feat
+
+        elif self.fusion_type == 'mul':
+            fused_feat = cnn_feat * stgcn_feat
+
+        elif self.fusion_type == 'mlp':
+            fused_feat = torch.cat([cnn_feat, stgcn_feat], dim=-1)
+            fused_feat = self.mlp(fused_feat)
+
+        # channel-attention
+        attention_weights = self.attention(fused_feat) # (B, T, D)
         fused_feat = fused_feat * attention_weights
 
         return fused_feat
 
 
+
 class EventDetector(nn.Module):
-    def __init__(self, pretrain, width_mult, lstm_layers, lstm_hidden, num_classes, fused_dim,
+    def __init__(self, pretrain, width_mult, lstm_layers, lstm_hidden, num_classes, fused_dim, fusion_type,
                  t_kernel_size=9,
                  bidirectional=True,
                  dropout=True,
@@ -39,9 +79,10 @@ class EventDetector(nn.Module):
         super(EventDetector, self).__init__()
         self.width_mult = width_mult
         self.num_classes = num_classes
+        self.fused_dim = fused_dim
+        self.fusion_type = fusion_type
         self.lstm_layers = lstm_layers
         self.lstm_hidden = lstm_hidden
-        self.fused_dim = fused_dim
         self.bidirectional = bidirectional
         self.dropout = dropout
         self.device = device
@@ -54,7 +95,7 @@ class EventDetector(nn.Module):
         self.cnn = nn.Sequential(*list(net.children())[0][:19])
         self.stgcn = STGCN(in_channels=3, graph_args={'layout': 'coco', 'strategy': 'spatial'},
                            edge_importance_weighting=True, t_kernel_size=t_kernel_size)
-        self.feature_fusion = FeatureFusionModule(cnn_dim=1280, stgcn_dim=256, fused_dim=self.fused_dim)
+        self.feature_fusion = FeatureFusionModule(cnn_dim=1280, stgcn_dim=256, fused_dim=self.fused_dim, fusion_type=self.fusion_type)
         self.rnn = nn.LSTM(int(self.fused_dim * width_mult if width_mult > 1.0 else self.fused_dim),
                            self.lstm_hidden, self.lstm_layers,
                            batch_first=True, bidirectional=bidirectional)
@@ -109,8 +150,29 @@ class EventDetector(nn.Module):
         trainable_num = sum(p.numel() for p in net.parameters() if p.requires_grad)
         return {'Total': total_num, 'Trainable': trainable_num}
 
+def count_parameters(model):
+    return sum(p.numel() for p in model.parameters() if p.requires_grad)
+
+def count_fusion():
+    B, T = 1, 64 
+    cnn_dim, stgcn_dim, fused_dim = 1280, 256, 256
+
+    dummy_cnn = torch.randn(B, T, cnn_dim)
+    dummy_stgcn = torch.randn(B, T, stgcn_dim)
+
+    fusion_types = ['add', 'concat', 'gate', 'mul', 'mlp']
+    print("Fusion Type |   Params   |   FLOPs")
+    print("----------------------------------------")
+
+    for fusion_type in fusion_types:
+        model = FeatureFusionModule(cnn_dim, stgcn_dim, fused_dim, fusion_type=fusion_type)
+        model.eval()
+        with torch.no_grad():
+            flops, params = profile(model, inputs=(dummy_cnn, dummy_stgcn), verbose=False)
+            print(f"{fusion_type:>10} | {params/1e3:9.1f}K | {flops/1e6:7.2f} MFLOPs")
 
 if __name__ == '__main__':
+    count_fusion()
     x = torch.randn(1, 64, 3, 160, 160).to("cuda:1")
     y = torch.randn(1, 64, 17, 3).to("cuda:1")
     model = EventDetector(pretrain=False,
@@ -119,8 +181,11 @@ if __name__ == '__main__':
                           lstm_hidden=256,
                           num_classes=9,
                           fused_dim=256,
+                          fusion_type="mlp",
                           device="cuda:1"
                           )
     model.to("cuda:1")
     out = model(x, y)
+    sum = count_parameters(model)
+    print(sum)
     print(out.shape)

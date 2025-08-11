@@ -1,6 +1,7 @@
 from torch.utils.data import DataLoader
 from dataloader import GolfDB, Normalize, ToTensor
 from model import EventDetector
+import os
 import torch
 import torch.nn.functional as F
 import numpy as np
@@ -38,28 +39,29 @@ def eval(model, seq_length, data_loader, disp, device='cuda:0', eval_event_num=8
     print('Average PCE: {}'.format(PCE))
     return PCE, single_PCE
 
-
-if __name__ == '__main__':
-    mode = 'fo'
-    seq_length = 64
-    n_cpu = 1
-    i = 10800
-    device = 'cuda:0'
-
+def validation(mode, fusion_type, seq_length, device='cuda:0', n_cpu=1, i=10):
+    weight_path = f"weights/{mode}_models/{fusion_type}/seq{seq_length}"
     config = {
         'dtl': {
-            'data_file': '/data/ssd1/xietingyu/frameflow_dtl/label.txt',
+            'data_file': '/data/ssd1/xietingyu/frameflow_dtl/val.txt',
             'vid_dir': '/data/ssd1/xietingyu/frameflow_dtl/videos/',
             'npy_dir': '/data/ssd1/xietingyu/frameflow_dtl/npy/',
             'num_classes': 9,
             'eval_events': 8
         },
         'fo': {
-            'data_file': '/data/ssd1/xietingyu/frameflow_fo/label.txt',
+            'data_file': '/data/ssd1/xietingyu/frameflow_fo/val.txt',
             'vid_dir': '/data/ssd1/xietingyu/frameflow_fo/videos/',
             'npy_dir': '/data/ssd1/xietingyu/frameflow_fo/npy/',
             'num_classes': 12,
             'eval_events': 11
+        },
+        'golfdb': {
+            'data_file': '/data/ssd1/xietingyu/golfdb/data/golfdb/val.txt',
+            'vid_dir': '/data/ssd1/xietingyu/golfdb/data/golfdb/all_mp4_file/',
+            'npy_dir': '/data/ssd1/xietingyu/golfdb/data/golfdb/key_point/',
+            'num_classes': 9,
+            'eval_events': 8
         }
     }
 
@@ -71,6 +73,7 @@ if __name__ == '__main__':
                           lstm_hidden=256,
                           num_classes=cfg['num_classes'],
                           fused_dim=256,
+                          fusion_type=fusion_type,
                           device=device)
 
     val_dataset = GolfDB(data_file=cfg['data_file'],
@@ -88,13 +91,24 @@ if __name__ == '__main__':
     for name, param in model.named_parameters():
         num_params = param.numel()
         total_params += num_params
-        print(f"{name}: {num_params} 个参数")
+        # print(f"{name}: {num_params} 个参数")
 
     print(f"模型总参数量: {total_params}")
-    while i > 0:
+    while i >= 0:
         torch.cuda.empty_cache()
-        save_dict = torch.load(f'./weights/fo_models/FS_FO_{i}.pth.tar')
+        save_dict = torch.load(os.path.join(weight_path,f"FS_{mode}_{i}.pth.tar"))
+        print(f"评估 FS_{mode}_{i}.pth模型....")
         model.load_state_dict(save_dict['model_state_dict'])
         model.to(device)
-        PCE, single_PCE = eval(model, seq_length, val_loader, disp=True, device=device, eval_event_num=cfg['eval_events'])
-        i -= 1080
+        eval(model, seq_length, val_loader, disp=False, device=device, eval_event_num=cfg['eval_events'])
+        i -= 1
+
+if __name__ == '__main__':
+    mode = 'golfdb' # mode=golfdb/dtl/fo
+    fusion_type = 'mul' # fusion_type=add/concat/gate/mul/mlp
+    seq_length = 128 # seq_length=32/64/128/256
+    device = 'cuda:3'
+    validation(mode=mode,fusion_type=fusion_type,seq_length=seq_length,device=device)
+    
+
+    
