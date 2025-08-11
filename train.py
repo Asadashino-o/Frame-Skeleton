@@ -98,6 +98,10 @@ def train_model(mode,fusion_type):
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=step, gamma=0.5)
     train_losses = AverageMeter()
 
+    folder_path =  f"weights/{mode}_models/{fusion_type}/seq{seq_length}"
+    if not os.path.exists(folder_path):
+        os.makedirs(folder_path)
+
     # 开始训练
     i = 0
     epoch = 0
