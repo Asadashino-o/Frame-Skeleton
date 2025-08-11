@@ -90,8 +90,8 @@ def process_videos_in_folder(input_folder, output_folder, mode='detectron2'):
 
 
 if __name__ == '__main__':
-    mode = 'detectron2'  # or 'yolo'
-    input_folder = './raw_videos/'
-    output_folder = './raw_key_point/'
+    mode = 'yolo'  # or 'detectron2'
+    input_folder = '/data/ssd1/xietingyu/frameflow_fo/videos'
+    output_folder = '/data/ssd1/xietingyu/frameflow_fo/yolo_npy'
 
     process_videos_in_folder(input_folder, output_folder, mode=mode)
