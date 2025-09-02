@@ -1,6 +1,7 @@
 import torch
 from torch.utils.data import DataLoader
 from torchvision import transforms
+import os
 
 from model import EventDetector
 from util import AverageMeter, freeze_layers
@@ -10,14 +11,14 @@ from dataloader import GolfDB, Normalize, ToTensor
 def count_frozen_parameters(model):
     total = 0
     frozen = 0
-    for name, param in model.named_parameters():
+    for _, param in model.named_parameters():
         total += param.numel()
         if not param.requires_grad:
             frozen += param.numel()
     print(f"冻结参数比例: {frozen}/{total} ({100. * frozen / total:.2f}%)")
 
 
-def train_model(mode,fusion_type):
+def train_model(mode,fusion_type,input_size,device):
     assert mode in ['dtl', 'fo', 'golfdb'], "mode must be either 'dtl' or 'fo' or 'golfdb'"
     assert fusion_type in ['add', 'concat', 'gate', 'mul', 'mlp'], "fusion_type must be either 'add' or 'concat' or 'gate' or 'mul' or 'mlp'"
 
@@ -25,7 +26,6 @@ def train_model(mode,fusion_type):
     seq_length = 128
     bs = 5
     k = 10
-    device = torch.device('cuda:2' if torch.cuda.is_available() else 'cpu')
 
     config = {
         'dtl': {
@@ -53,9 +53,9 @@ def train_model(mode,fusion_type):
         'golfdb': {
             'iterations': 9600,
             'it_save': 960,
-            'data_file': '/data/ssd1/xietingyu/golfdb/data/golfdb/train.txt',
-            'vid_dir': '/data/ssd1/xietingyu/golfdb/data/golfdb/all_mp4_file/',
-            'npy_dir': '/data/ssd1/xietingyu/golfdb/data/golfdb/key_point/',
+            'data_file': '/data/ssd1/xietingyu/Frame-Skeleton/data/golfdb/train.txt',
+            'vid_dir': '/data/ssd1/xietingyu/Frame-Skeleton/data/golfdb/all_mp4_file/',
+            'npy_dir': '/data/ssd1/xietingyu/Frame-Skeleton/data/golfdb/key_point/',
             'num_classes': 9,
             'save_path': 'weights/golfdb_models/concat/seq128/golfdb_{}.pth.tar',
             'weights': [1 / 8] * 8 + [1 / 35],
@@ -69,7 +69,7 @@ def train_model(mode,fusion_type):
     # 初始化模型
     model = EventDetector(pretrain=True, width_mult=1., lstm_layers=2,
                           lstm_hidden=256, num_classes=cfg['num_classes'],
-                          fused_dim=256, fusion_type=fusion_type, device=device)
+                          fused_dim=256, fusion_type=fusion_type)
     freeze_layers(k, model)
     count_frozen_parameters(model)
     model.train()
@@ -81,7 +81,7 @@ def train_model(mode,fusion_type):
         vid_dir=cfg['vid_dir'],
         npy_dir=cfg['npy_dir'],
         seq_length=seq_length,
-        input_size=160,
+        input_size=input_size,
         transform=transforms.Compose([ToTensor(),
                                       Normalize([0.485, 0.456, 0.406],
                                                 [0.229, 0.224, 0.225])]),
@@ -97,10 +97,6 @@ def train_model(mode,fusion_type):
     optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, model.parameters()), lr=0.001)
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=step, gamma=0.5)
     train_losses = AverageMeter()
-
-    folder_path =  f"weights/{mode}_models/{fusion_type}/seq{seq_length}"
-    if not os.path.exists(folder_path):
-        os.makedirs(folder_path)
 
     # 开始训练
     i = 0
@@ -121,9 +117,11 @@ def train_model(mode,fusion_type):
             print(f'Epoch: {epoch}, Iteration: {i}, Training Loss: {train_losses.val:.4f} ({train_losses.avg:.4f})')
 
             if i % it_save == 0:
-                save_path = f"weights/{mode}_models/{fusion_type}/seq{seq_length}/FS_{mode}_{package}.pth.tar"
+                save_path = f"weights/{mode}_models/{fusion_type}/image{input_size}/seq{seq_length}"
+                save_folder = os.path.join(save_path,f"FS_{mode}_{package}.pth.tar")
+                os.makedirs(save_path, exist_ok=True)
                 torch.save({'optimizer_state_dict': optimizer.state_dict(),
-                    'model_state_dict': model.state_dict()}, save_path)
+                    'model_state_dict': model.state_dict()}, save_folder)
                 package +=1
             scheduler.step()
             i += 1
@@ -131,7 +129,9 @@ def train_model(mode,fusion_type):
 
 
 if __name__ == '__main__':
-    mode = 'golfdb' # mode=golfdb/dtl/fo
-    fusion_type = 'gate' # fusion_type=add/concat/gate/mul/mlp
-    train_model(mode=mode,fusion_type=fusion_type) 
+    mode = 'dtl' # mode=golfdb/dtl/fo
+    fusion_type = 'concat' # fusion_type=add/concat/gate/mul/mlp
+    input_size = 224 # 160/224
+    device = "cuda:3"
+    train_model(mode=mode,fusion_type=fusion_type,input_size=input_size,device=device) 
     print("finish")

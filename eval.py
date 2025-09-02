@@ -39,8 +39,8 @@ def eval(model, seq_length, data_loader, disp, device='cuda:0', eval_event_num=8
     print('Average PCE: {}'.format(PCE))
     return PCE, single_PCE
 
-def validation(mode, fusion_type, seq_length, device='cuda:0', n_cpu=1, i=10):
-    weight_path = f"weights/{mode}_models/{fusion_type}/seq{seq_length}"
+def validation(mode, fusion_type, seq_length, input_size, device='cuda:0', n_cpu=1, i=10):
+    weight_path = f"weights/{mode}_models/{fusion_type}/image{input_size}/seq{seq_length}"
     config = {
         'dtl': {
             'data_file': '/data/ssd1/xietingyu/frameflow_dtl/val.txt',
@@ -57,9 +57,9 @@ def validation(mode, fusion_type, seq_length, device='cuda:0', n_cpu=1, i=10):
             'eval_events': 11
         },
         'golfdb': {
-            'data_file': '/data/ssd1/xietingyu/golfdb/data/golfdb/val.txt',
-            'vid_dir': '/data/ssd1/xietingyu/golfdb/data/golfdb/all_mp4_file/',
-            'npy_dir': '/data/ssd1/xietingyu/golfdb/data/golfdb/key_point/',
+            'data_file': '/data/ssd1/xietingyu/Frame-Skeleton/data/golfdb/val.txt',
+            'vid_dir': '/data/ssd1/xietingyu/Frame-Skeleton/data/golfdb/all_mp4_file/',
+            'npy_dir': '/data/ssd1/xietingyu/Frame-Skeleton/data/golfdb/key_point/',
             'num_classes': 9,
             'eval_events': 8
         }
@@ -74,13 +74,13 @@ def validation(mode, fusion_type, seq_length, device='cuda:0', n_cpu=1, i=10):
                           num_classes=cfg['num_classes'],
                           fused_dim=256,
                           fusion_type=fusion_type,
-                          device=device)
+                          dropout=False)
 
     val_dataset = GolfDB(data_file=cfg['data_file'],
                          vid_dir=cfg['vid_dir'],
                          npy_dir=cfg['npy_dir'],
                          seq_length=seq_length,
-                         input_size=160,
+                         input_size=input_size,
                          transform=transforms.Compose([ToTensor(),
                                                        Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])]),
                          train=False,
@@ -104,11 +104,12 @@ def validation(mode, fusion_type, seq_length, device='cuda:0', n_cpu=1, i=10):
         i -= 1
 
 if __name__ == '__main__':
-    mode = 'golfdb' # mode=golfdb/dtl/fo
-    fusion_type = 'mul' # fusion_type=add/concat/gate/mul/mlp
+    mode = 'dtl' # mode=golfdb/dtl/fo
+    fusion_type = 'concat' # fusion_type=add/concat/gate/mul/mlp
     seq_length = 128 # seq_length=32/64/128/256
+    input_size = 224 # 160/224
     device = 'cuda:3'
-    validation(mode=mode,fusion_type=fusion_type,seq_length=seq_length,device=device)
+    validation(mode=mode,fusion_type=fusion_type,seq_length=seq_length,input_size=input_size,device=device)
     
 
     
