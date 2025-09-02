@@ -6,29 +6,23 @@ from module.semantic_encoder import STGCN
 
 
 class PeopleAttentionFuse(nn.Module):
-    """
-    输入: x (N, M, T, C)
-    掩码: mask (N, M, 1, 1)  1=有效人, 0=无效/占位
-    输出: out (N, T, C), attn (N, M, T)
-    """
     def __init__(self, c_out, hidden=128):
         super().__init__()
         self.score = nn.Sequential(
             nn.LayerNorm(c_out),
             nn.Linear(c_out, hidden),
             nn.ReLU(inplace=True),
-            nn.Linear(hidden, 1)  # 每个(N,M,T)位置产出一个logit
+            nn.Linear(hidden, 1)  
         )
 
     def forward(self, x, mask=None):
         # x: (N, M, T, C)
-        logits = self.score(x)                  # (N, M, T, 1)
+        logits = self.score(x)                  
         if mask is not None:
-            # 无效人位置打 -inf，避免分到权重
             logits = logits.masked_fill(~mask.bool(), float('-inf'))
-        attn = torch.softmax(logits, dim=1)     # 在人维M做softmax -> (N, M, T, 1)
-        out = (attn * x).sum(dim=1)             # (N, T, C)
-        return out, attn.squeeze(-1)            # (N, T, C), (N, M, T)
+        attn = torch.softmax(logits, dim=1)     
+        out = (attn * x).sum(dim=1)          
+        return out, attn.squeeze(-1)      # (N, T, C), (N, M, T)
     
 
 class FeatureFusionModule(nn.Module):
