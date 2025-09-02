@@ -4,25 +4,38 @@ from thop import profile
 from module.image_encode import MobileNetV2
 from module.semantic_encoder import STGCN
 
+def masked_softmax(logits, mask, dim=1, eps=1e-9):
+    # logits: (N, M, T, 1), mask: (N, M, 1, 1) with 0/1
+    mask = mask.to(dtype=logits.dtype)
+    logits = logits - logits.max(dim=dim, keepdim=True).values 
+    exp = (logits.exp() * mask)                                 
+    denom = exp.sum(dim=dim, keepdim=True) + eps                
+    return exp / denom                                          
 
 class PeopleAttentionFuse(nn.Module):
+    """
+    输入: x (N, M, T, C)
+    掩码: mask (N, M, 1, 1)  1=有效人, 0=无效/占位
+    输出: out (N, T, C), attn (N, M, T)
+    """
     def __init__(self, c_out, hidden=128):
         super().__init__()
         self.score = nn.Sequential(
             nn.LayerNorm(c_out),
             nn.Linear(c_out, hidden),
             nn.ReLU(inplace=True),
-            nn.Linear(hidden, 1)  
+            nn.Linear(hidden, 1)  # 每个(N,M,T)位置产出一个logit
         )
 
     def forward(self, x, mask=None):
         # x: (N, M, T, C)
-        logits = self.score(x)                  
-        if mask is not None:
-            logits = logits.masked_fill(~mask.bool(), float('-inf'))
-        attn = torch.softmax(logits, dim=1)     
-        out = (attn * x).sum(dim=1)          
-        return out, attn.squeeze(-1)      # (N, T, C), (N, M, T)
+        logits = self.score(x)                     # (N, M, T, 1)
+        if mask is None:
+            attn = torch.softmax(logits, dim=1)
+        else:
+            attn = masked_softmax(logits, mask, dim=1)  # (N, M, T, 1)
+        out = (attn * x).sum(dim=1)                # (N, T, C)
+        return out, attn.squeeze(-1)            # (N, T, C), (N, M, T)
     
 
 class FeatureFusionModule(nn.Module):
