@@ -86,7 +86,7 @@ def test(video_path):
     dl = DataLoader(ds, batch_size=1, shuffle=False, drop_last=False)
 
     try:
-        save_dict = torch.load('./APP_fo_models//FS_FO_10800.pth.tar')
+        save_dict = torch.load('/path/to/your/weight/file')
     except:
         print(
             "Model weights not found. Download model weights and place in 'models' folder. See README for instructions")
@@ -213,3 +213,4 @@ if __name__ == '__main__':
     print(f"处理完成 {success_count}/{len(video_files)} 个视频")
     print(f"总耗时: {total_time:.2f} 秒 (平均 {total_time / len(video_files):.2f} 秒/个)")
     print(f"所有结果已保存到: {os.path.abspath(MAIN_OUTPUT_DIR)}")
+
