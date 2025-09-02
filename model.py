@@ -1,10 +1,35 @@
 import torch
 import torch.nn as nn
-from torch.autograd import Variable
 from thop import profile
 from module.image_encode import MobileNetV2
 from module.semantic_encoder import STGCN
 
+
+class PeopleAttentionFuse(nn.Module):
+    """
+    输入: x (N, M, T, C)
+    掩码: mask (N, M, 1, 1)  1=有效人, 0=无效/占位
+    输出: out (N, T, C), attn (N, M, T)
+    """
+    def __init__(self, c_out, hidden=128):
+        super().__init__()
+        self.score = nn.Sequential(
+            nn.LayerNorm(c_out),
+            nn.Linear(c_out, hidden),
+            nn.ReLU(inplace=True),
+            nn.Linear(hidden, 1)  # 每个(N,M,T)位置产出一个logit
+        )
+
+    def forward(self, x, mask=None):
+        # x: (N, M, T, C)
+        logits = self.score(x)                  # (N, M, T, 1)
+        if mask is not None:
+            # 无效人位置打 -inf，避免分到权重
+            logits = logits.masked_fill(~mask.bool(), float('-inf'))
+        attn = torch.softmax(logits, dim=1)     # 在人维M做softmax -> (N, M, T, 1)
+        out = (attn * x).sum(dim=1)             # (N, T, C)
+        return out, attn.squeeze(-1)            # (N, T, C), (N, M, T)
+    
 
 class FeatureFusionModule(nn.Module):
     def __init__(self, cnn_dim, stgcn_dim, fused_dim, fusion_type='add'):
@@ -69,13 +94,26 @@ class FeatureFusionModule(nn.Module):
         return fused_feat
 
 
+class LockedDropout(nn.Module):
+    """时间维共享掩码的 dropout：对 [B, T, D] 更友好。"""
+    def __init__(self, p: float):
+        super().__init__()
+        self.p = p
+    def forward(self, x):
+        if not self.training or self.p == 0:
+            return x
+        # x: [B, T, D]
+        B, T, D = x.shape
+        mask = x.new_empty(B, 1, D).bernoulli_(1 - self.p).div_(1 - self.p)
+        return x * mask
+
 
 class EventDetector(nn.Module):
     def __init__(self, pretrain, width_mult, lstm_layers, lstm_hidden, num_classes, fused_dim, fusion_type,
                  t_kernel_size=9,
                  bidirectional=True,
                  dropout=True,
-                 device='cuda:0'):
+                 multi_person=False):
         super(EventDetector, self).__init__()
         self.width_mult = width_mult
         self.num_classes = num_classes
@@ -84,62 +122,73 @@ class EventDetector(nn.Module):
         self.lstm_layers = lstm_layers
         self.lstm_hidden = lstm_hidden
         self.bidirectional = bidirectional
-        self.dropout = dropout
-        self.device = device
+        self.use_dropout = dropout
+        self.multi_person = multi_person
 
         net = MobileNetV2(width_mult=width_mult)
         if pretrain:
-            state_dict_mobilenet = torch.load('./weights/mobilenet_v2.pth.tar')
-            net.load_state_dict(state_dict_mobilenet, False)
+            state_dict_mobilenet = torch.load('./weights/mobilenet_v2.pth.tar', map_location='cpu')
+            net.load_state_dict(state_dict_mobilenet, strict=False)
 
         self.cnn = nn.Sequential(*list(net.children())[0][:19])
+        self.gap = nn.AdaptiveAvgPool2d(1)
+
         self.stgcn = STGCN(in_channels=3, graph_args={'layout': 'coco', 'strategy': 'spatial'},
                            edge_importance_weighting=True, t_kernel_size=t_kernel_size)
+        
         self.feature_fusion = FeatureFusionModule(cnn_dim=1280, stgcn_dim=256, fused_dim=self.fused_dim, fusion_type=self.fusion_type)
-        self.rnn = nn.LSTM(int(self.fused_dim * width_mult if width_mult > 1.0 else self.fused_dim),
-                           self.lstm_hidden, self.lstm_layers,
-                           batch_first=True, bidirectional=bidirectional)
-        if self.bidirectional:
-            self.lin = nn.Linear(2 * self.lstm_hidden, num_classes)
-        else:
-            self.lin = nn.Linear(self.lstm_hidden, num_classes)
-        if self.training and self.dropout:
-            self.drop = nn.Dropout(0.5)
 
-    def init_hidden(self, batch_size, device):
-        if self.bidirectional:
-            return (
-                Variable(torch.zeros(2 * self.lstm_layers, batch_size, self.lstm_hidden).to(device),
-                         requires_grad=True),
-                Variable(torch.zeros(2 * self.lstm_layers, batch_size, self.lstm_hidden).to(device),
-                         requires_grad=True))
-        else:
-            return (
-                Variable(torch.zeros(self.lstm_layers, batch_size, self.lstm_hidden).to(device), requires_grad=True),
-                Variable(torch.zeros(self.lstm_layers, batch_size, self.lstm_hidden).to(device), requires_grad=True))
+        lstm_in_dim = self.fused_dim
+        lstm_dropout = 0.3 if (self.use_dropout and lstm_layers > 1) else 0.0
+        self.rnn = nn.LSTM(lstm_in_dim, self.lstm_hidden, self.lstm_layers,
+                           batch_first=True, bidirectional=bidirectional, dropout=lstm_dropout)
+        
+        feat_dim = 2 * self.lstm_hidden if bidirectional else self.lstm_hidden
+        self.lin = nn.Linear(feat_dim, num_classes)
+
+        self.lockdrop_in = LockedDropout(0.2 if self.use_dropout else 0.0) 
+        self.drop_head = nn.Dropout(0.5 if self.use_dropout else 0.0)
+
+        self.people_fuser = PeopleAttentionFuse(c_out=256, hidden=128) if multi_person else None
+
 
     def forward(self, x, y):
-        batch_size, timesteps, C, H, W = x.size()
-        batch_size, timesteps, num_keypoints, channel = y.size()
-        self.hidden = self.init_hidden(batch_size, self.device)
-
         # CNN forward
+        batch_size, timesteps, C, H, W = x.size()
         c_in = x.view(batch_size * timesteps, C, H, W)
-        c_out = self.cnn(c_in)
-        c_out = c_out.mean(3).mean(2)
-        c_out = c_out.view(batch_size, timesteps, -1)
+        c_feat = self.cnn(c_in)                 
+        c_feat = self.gap(c_feat).flatten(1)    
+        c_out = c_feat.reshape(batch_size, timesteps, -1) 
 
         # ST-GCN forward
-        g_in = y.permute(0, 3, 1, 2).reshape(batch_size, channel, timesteps, num_keypoints, 1)
+        if self.multi_person:
+            batch_size, timesteps, num_keypoints, channel, people = y.size()
+            g_in = y.permute(0, 3, 1, 2, 4).reshape(batch_size, channel, timesteps, num_keypoints, people)
+            g_out = self.stgcn(g_in)
+            G_out = g_out.size(-1)
+            x_mp  = g_out.view(batch_size, people, timesteps, G_out)  # (N, M, T, C')
 
-        g_out = self.stgcn(g_in)
-        if self.dropout:
-            c_out = self.drop(c_out)
-        # LSTM forward
+            with torch.no_grad():
+                person_mask_bool = (y.abs().sum(dim=(1,2,3)) > 0)      # (N, M)
+            mask = person_mask_bool.unsqueeze(-1).unsqueeze(-1)        # (N, M, 1, 1)
+
+            g_out, attn = self.people_fuser(x_mp, mask=mask)
+
+        else:
+            batch_size, timesteps, num_keypoints, channel = y.size()
+            g_in = y.permute(0, 3, 1, 2).reshape(batch_size, channel, timesteps, num_keypoints, 1)
+            g_out = self.stgcn(g_in)
+
+        # fused module
         fused_feature = self.feature_fusion(c_out, g_out)
 
-        r_in = fused_feature  # 输出 (N, T, 256)
-        r_out, states = self.rnn(r_in, self.hidden)
+        # LSTM forward
+        fused_feature = self.lockdrop_in(fused_feature)
+        r_in = fused_feature 
+        r_out, _ = self.rnn(r_in)
+
+        # Classifer
+        r_out = self.drop_head(r_out)
         out = self.lin(r_out)
         out = out.view(batch_size * timesteps, self.num_classes)
 
@@ -174,15 +223,15 @@ def count_fusion():
 if __name__ == '__main__':
     count_fusion()
     x = torch.randn(1, 64, 3, 160, 160).to("cuda:1")
-    y = torch.randn(1, 64, 17, 3).to("cuda:1")
+    y = torch.randn(1, 64, 17, 3, 2).to("cuda:1")
     model = EventDetector(pretrain=False,
                           width_mult=1.,
                           lstm_layers=2,
                           lstm_hidden=256,
                           num_classes=9,
                           fused_dim=256,
-                          fusion_type="mlp",
-                          device="cuda:1"
+                          fusion_type="gate",
+                          multi_person=True
                           )
     model.to("cuda:1")
     out = model(x, y)
