@@ -91,7 +91,7 @@ def test(video_path, mode='detectron2', task='dtl'):
     dl = DataLoader(ds, batch_size=1, shuffle=False)
 
     try:
-        save_dict = torch.load('./weights/FS_FO_10800.pth.tar')
+        save_dict = torch.load('/path/to/your/weight/file')
     except:
         print("Model weights not found.")
         return
